@@ -128,3 +128,41 @@ seqs = seqs |> merge(
 
 seqs[, id := paste0(gene_name, "|", ensembl_gene_id)]
 
+
+# split into overlapping fragments --------
+
+fragment = function(seq, id, width = 100, step = 50) {
+    
+    n = nchar(seq)
+    
+    if(n <= width) return(data.table(frag_id = paste0(id, "_1_", n), seq = seq))
+    
+    starts = seq(1, n - width + 1, by = step)
+    
+    if(tail(starts, 1) + width - 1 < n) starts = c(starts, n - width + 1)
+    
+    data.table(
+        frag_id = paste0(id, "_", starts, "_", starts + width - 1),
+        seq     = substring(seq, starts, starts + width - 1)
+    )
+}
+
+
+frags = seqs[, by = id, fragment(gene_exon_intron, id)]
+
+frags = frags[!seq %like% "N"]
+
+
+# write fasta --------
+
+out = frags$seq |> str_replace_all("T", "U") |> RNAStringSet()
+
+names(out) = frags$frag_id
+
+out |> writeXStringSet("fragments_100nt.fa")
+
+ 
+
+
+
+
