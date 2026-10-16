@@ -67,12 +67,53 @@ fwrite(
 
 mart = useEnsembl(biomart = "genes", dataset = "hsapiens_gene_ensembl")
 
-seqs = getSequence(
-     id      = df$ensembl,
-     type    = "ensembl_gene_id",
-     seqType = "gene_exon_intron",
-     mart    = mart
- ) |> setDT()
+# seqs = getSequence(
+#     id      = df$ensembl,
+#     type    = "ensembl_gene_id",
+#     seqType = "gene_exon_intron",
+#     mart    = mart
+# ) |> setDT()
+
+get_seq_safe = function(id, mart, retries = 3) {
+    
+    for(i in seq_len(retries)) {
+        
+        out = tryCatch(
+            getSequence(
+                id      = id,
+                type    = "ensembl_gene_id",
+                seqType = "gene_exon_intron",
+                mart    = mart
+            ) |> setDT(),
+            error = function(e) NULL
+        )
+        
+        if(!is.null(out) && nrow(out)) return(out)
+        
+        Sys.sleep(5)   # περίμενε και ξαναδοκίμασε
+    }
+    
+    message("  failed: ", id)
+    
+    return(NULL)
+}
+
+
+seqs = list()
+
+for(i in seq_len(nrow(df))) {
+    
+    id = df$ensembl[i]
+    
+    message(i, "/", nrow(df), "  ", df$gene_name[i], "  (", id, ")")
+    
+    seqs[[id]] = get_seq_safe(id, mart)
+    
+    Sys.sleep(1)
+}
+
+
+seqs = seqs |> rbindlist(use.names = TRUE, fill = TRUE)
 
 seqs = seqs[gene_exon_intron != "Sequence unavailable"]
 
@@ -86,43 +127,4 @@ seqs = seqs |> merge(
 
 
 seqs[, id := paste0(gene_name, "|", ensembl_gene_id)]
-
-
-
-# split into overlapping fragments --------
-
-fragment = function(seq, id, width = 100, step = 50) {
-    
-    n = nchar(seq)
-    
-    if(n <= width) return(data.table(frag_id = paste0(id, "_1_", n), seq = seq))
-    
-    starts = seq(1, n - width + 1, by = step)
-    
-    if(tail(starts, 1) + width - 1 < n) starts = c(starts, n - width + 1)
-    
-    data.table(
-        frag_id = paste0(id, "_", starts, "_", starts + width - 1),
-        seq     = substring(seq, starts, starts + width - 1)
-    )
-}
-
-
-frags = seqs[, by = id, fragment(gene_exon_intron, id)]
-
-frags = frags[!seq %like% "N"]
-
-
-# write fasta --------
-
-out = frags$seq |> str_replace_all("T", "U") |> RNAStringSet()
-
-names(out) = frags$frag_id
-
-out |> writeXStringSet("fragments_100nt.fa")
-
- 
-
-
-
 
